@@ -1,0 +1,254 @@
+from pprint import pprint
+import pygame
+
+pygame.init()
+
+#CONSTANTS
+#Grid size
+ROWS = 20
+COLUMNS = 30
+WIDTH = 1200
+HEIGHT = 800
+CELL_SIZE = WIDTH // COLUMNS #40
+LINE_WIDTH = 1
+
+#Colors: (R, B, G)
+WHITE = (255, 255, 255)
+GRAY = (180, 180, 180)
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+BLACK = (0, 0, 0)
+
+#PYGAME SETUP
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Pathfinding Game")
+screen.fill(BLACK)
+clock = pygame.time.Clock()
+FPS = 100
+
+
+class Grid:
+
+    def __init__(self, rows, columns, cellSize):
+        self.rows = rows
+        self.columns = columns
+        self.grid = [['' for i in range(columns)] for j in range(rows)]
+        self.barriers = []
+        self.cellSize = cellSize
+
+    
+    #helper function: gives list of neighboring squares
+    #params: row and column of current square
+    #return: neighbors (list of (row,col) tuples)
+    def get_neighbors(self, row, col):
+        neighbors = []
+        if row > 0:
+            neighbors.append((row-1, col))
+        if row < self.rows - 1:
+            neighbors.append((row+1, col))
+        if col > 0:
+            neighbors.append((row, col-1))
+        if col < self.columns - 1:
+            neighbors.append((row, col+1))
+        return neighbors
+    
+    #get shortest paths to a square
+    #params: starting square ((row,col) tuples)
+    #return: dictionary of square (row, col) : (distance, path (square list))
+    def getPaths(self, start):
+        #path to each square start as inf unless self
+        #paths = {(i, j):(float('inf'), []) for i in range(columns) for j in range(rows)}
+        #(row,col): (dist, [route])
+        paths = {}
+        for i in range(self.rows):
+            for j in range(self.columns):
+                paths[(i,j)] = (float('inf'), [])
+        paths[start] = (0, [])
+        #next to explore from
+        explore = [(0, start)]
+        while len(explore) > 0:
+            dist, cell = explore.pop()
+            #make sure we should explore from current path, meaning current path is shorter
+            if dist > paths[cell][0]:
+                continue
+            #all neighbors of the square
+            neighbors = self.get_neighbors(cell[0], cell[1])
+            for n in neighbors:
+                #if new distance is less than previous distance
+                if dist + 1 < paths[n][0]:
+                    #update distance and path
+                    new_route = paths[cell][1] + [cell]
+                    new_dist = dist+1
+                    paths[n] = (new_dist, new_route)
+                    #should explore from this neighbor using this path
+                    explore.append((new_dist, n))
+                    #keep shortest distance first so that pop() will give shortest for a square if multiple distances for it in list
+                    explore.sort()
+        return paths
+    
+    def getPathFromTo(self, cellTo, cellFrom):
+        paths = self.getPaths(cellTo)
+        #pprint(paths[cellFrom])
+        path = paths[cellFrom][1]
+        path.reverse()
+        return path
+    
+    #get a grid displaying distances
+    #params: path dict from getPaths()
+    #return: list of distances in grid format
+    def getPathGrid(self, paths):
+        pathGrid = [['' for i in range(self.columns)] for j in range(self.rows)]
+        for cell, path in paths.items():
+            row, col = cell
+            dist = str(path[0])
+            if len(dist) == 1: dist = '0' + dist
+            if self.grid[row][col] != '': dist = self.grid[row][col]
+            pathGrid[row][col] = dist
+        return pathGrid
+    
+    #draw grid
+    def draw(self):
+        for i in range(1, self.rows):
+            pygame.draw.line(screen, WHITE, (0, CELL_SIZE * i), (WIDTH, CELL_SIZE * i), LINE_WIDTH)
+        for i in range(1, self.columns):
+            pygame.draw.line(screen, WHITE, (CELL_SIZE * i, 0), (CELL_SIZE * i, HEIGHT), LINE_WIDTH)
+    
+    def getCellMiddle(self, row, col):
+        x = self.cellSize * col + 0.5 * self.cellSize
+        y = self.cellSize * row + 0.5 * self.cellSize
+        return (x, y)
+
+    
+    def getCell(self, x, y):
+        row = int(y // self.cellSize)
+        col = int(x // self.cellSize)
+        return (row, col)
+
+#MOVING ENTITY
+class Entity:
+    
+    def __init__(self, start_row, start_col, size, color, speed, grid):
+        self.row = start_row
+        self.col = start_col
+        self.grid = grid
+        self.x, self.y = grid.getCellMiddle(self.row, self.col)
+        self.size = size
+        self.color = color
+        self.speed = speed
+        self.rect = pygame.Rect(self.x - self.size/2, self.y - self.size/2, size, size)
+        self.drawn = pygame.draw.rect(screen, self.color, self.rect)
+
+    #moves entity
+    #params: change in x, change in y
+    #return: True if in same cell, else False
+    def move(self, dx, dy):
+        self.x += self.speed * dx
+        self.y += self.speed * dy
+        #update cell
+        self.row, self.col = self.grid.getCell(self.x, self.y)
+        self.rect = pygame.Rect(self.x - self.size/2, self.y - self.size/2, self.size, self.size)
+
+    def draw(self):
+        self.drawn = pygame.draw.rect(screen, self.color, self.rect)
+
+#PLAYER
+class Player(Entity):
+
+    def __init__(self, start_row, start_col, grid):
+        super().__init__(start_row, start_col, 20, GREEN, 2, grid)
+
+#ENEMY
+class Enemy(Entity):
+
+    def __init__(self, start_row, start_col, grid):
+        super().__init__(start_row, start_col, 20, RED, 1, grid)
+        self.path = []
+        self.nextRow, self.nextCol = 0, 0
+        self.nextX, self.nextY = 0, 0
+        self.dx, self.dy = 0, 0
+        self.wait = 200
+
+    def getNextCell(self):
+        if not self.path: #path is empty
+            self.nextX, self.nextY = self.x, self.y
+            self.dx, self.dy = 0, 0
+        else: #get new coords, update dx and dy accordingly
+            self.nextRow, self.nextCol = self.path.pop(0)
+            self.nextX, self.nextY = self.grid.getCellMiddle(self.nextRow, self.nextCol)
+            self.dx = 1 if self.nextX > self.x else -1 if self.nextX < self.x else 0
+            self.dy = 1 if self.nextY > self.y else -1 if self.nextY < self.y else 0
+
+
+    def followPath(self):
+        #stop if we're very close to the target
+        if abs(self.x - self.nextX) <= self.speed and abs(self.y - self.nextY) <= self.speed:
+            self.x, self.y = self.nextX, self.nextY #snap
+            self.row, self.col = self.grid.getCell(self.x, self.y) #update row and col
+            if self.path:
+                self.getNextCell()
+            else:
+                self.dx, self.dy = 0, 0
+        else:
+            #set dx, dy to -1, 0, or 1 based on comparison with next values
+            #need to do this since may have reached a turn?
+            self.dx = 1 if self.nextX > self.x else -1 if self.nextX < self.x else 0
+            self.dy = 1 if self.nextY > self.y else -1 if self.nextY < self.y else 0
+        super().move(self.dx, self.dy)
+        self.wait -= 1
+
+    def updatePath(self, playerRow, playerCol):
+        self.path = grid.getPathFromTo((playerRow, playerCol), (self.row, self.col))
+        self.getNextCell()
+        self.wait = 200
+
+
+
+#GAME SETUP
+#Instantiate objects
+grid = Grid(ROWS, COLUMNS, CELL_SIZE)
+player = Player(5, 5, grid)
+enemy = Enemy(9, 9, grid)
+enemy.updatePath(player.row, player.col)
+paths = grid.getPaths((5,5))
+pprint(paths)
+
+
+#start = (1,2)
+#paths = grid.getPaths(start)
+#pathGrid = grid.getPathGrid(paths)
+#pprint(pathGrid)
+
+#SETUP
+running = True
+grid.draw()
+
+def display():
+    screen.fill(BLACK)
+    grid.draw()
+    player.draw()
+    enemy.draw()
+    pygame.display.update()
+
+#GAME LOOP
+while running:
+
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT: running = False
+
+    keys = pygame.key.get_pressed()
+    dx = keys[pygame.K_RIGHT] or keys[pygame.K_d] - keys[pygame.K_LEFT] or keys[pygame.K_a]
+    dy = keys[pygame.K_DOWN] or keys[pygame.K_s] - keys[pygame.K_UP] or keys[pygame.K_w]
+
+    player.move(dx, dy)
+
+    #if collision with any barrier: player.move(-dx, -dy)
+    #or move and undo move seperately
+
+    if enemy.wait < 1:
+        enemy.updatePath(player.row, player.col)
+    enemy.followPath()
+        
+
+    #draw everything
+    display()
+    clock.tick(FPS)
