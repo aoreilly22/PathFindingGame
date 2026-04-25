@@ -1,0 +1,92 @@
+from pprint import pprint
+import pygame
+
+#CONSTANTS
+ROWS = 30
+COLUMNS = 20
+WIDTH = 800
+HEIGHT = 1200
+CELL_SIZE = WIDTH // COLUMNS #40
+LINE_WIDTH = 1
+
+class Grid:
+
+    def __init__(self, rows, columns):
+        self.rows = rows
+        self.columns = columns
+        self.grid = [['' for i in range(columns)] for j in range(rows)]
+    
+    #helper function: gives list of neighboring squares
+    #params: row and column of current square
+    #return: neighbors (list of (row,col) tuples)
+    def get_neighbors(self, row, col):
+
+        neighbors = []
+        if row > 0:
+            neighbors.append((row-1, col))
+        if row < self.rows - 1:
+            neighbors.append((row+1, col))
+        if col > 0:
+            neighbors.append((row, col-1))
+        if col < self.columns - 1:
+            neighbors.append((row, col+1))
+        return neighbors
+    
+    #get shortest paths to a square
+    #params: starting square ((row,col) tuples)
+    #return: dictionary of square (row, col) : (distance, path (square list))
+    def getPaths(self, start):
+        #path to each square start as inf unless self
+        #paths = {(i, j):(float('inf'), []) for i in range(columns) for j in range(rows)}
+        #(row,col): (dist, [route])
+        paths = {}
+        for i in range(self.rows):
+            for j in range(self.columns):
+                paths[(i,j)] = (float('inf'), [])
+        paths[start] = (0, [])
+        #next to explore from
+        explore = [(0, start)]
+        while len(explore) > 0:
+            dist, cell = explore.pop()
+            #make sure we should explore from current path, meaning current path is shorter
+            if dist > paths[cell][0]:
+                continue
+            #all neighbors of the square
+            neighbors = self.get_neighbors(cell[0], cell[1])
+            for n in neighbors:
+                #if new distance is less than previous distance
+                if dist + 1 < paths[n][0]:
+                    #update distance and path
+                    new_route = paths[cell][1] + [cell]
+                    new_dist = dist+1
+                    paths[n] = (new_dist, new_route)
+                    #should explore from this neighbor using this path
+                    explore.append((new_dist, n))
+                    #keep shortest distance first so that pop() will give shortest for a square if multiple distances for it in list
+                    explore.sort()
+        return paths
+    
+    #get a grid displaying distances
+    #params: path dict from getPaths()
+    #return: list of distances in grid format
+    def getPathGrid(self, paths):
+        pathGrid = [['' for i in range(self.columns)] for j in range(self.rows)]
+        for cell, path in paths.items():
+            row, col = cell
+            dist = str(path[0])
+            if len(dist) == 1: dist = '0' + dist
+            if self.grid[row][col] != '': dist = self.grid[row][col]
+            pathGrid[row][col] = dist
+        return pathGrid
+
+
+#GAME SETUP
+#Instantiate objects
+grid = Grid(ROWS, COLUMNS)
+
+start = (1,2)
+paths = grid.getPaths(start)
+pprint(paths)
+#pathGrid = grid.getPathGrid(paths)
+#pprint(pathGrid)
+
